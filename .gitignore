@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.vscode/
+.idea/
+
+# Nada de cliente entra no repositorio
+perfis.toml
+.claude/
+*.pem
+*.key
+*.ppk
+id_*
+.env*
