@@ -15,18 +15,51 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import re
 import sys
 from pathlib import Path
 
 from . import credenciais
-from .config import AMBIENTES, ErroConfig, Perfil, carregar_perfis, obter_perfil, salvar_perfil, salvar_perfis
+from .armazenamento import raiz_git
+from .config import (
+    AMBIENTES, AUTENTICACOES, ErroConfig, Perfil, carregar_perfis, obter_perfil, salvar_perfil, salvar_perfis,
+)
 from .conexao import ErroConexao, GerenciadorConexoes, chave_do_servidor, fingerprint
 from .operacoes import ERROS_ESPERADOS, Operacoes
 
 
-def _perguntar(texto: str, padrao: str = "") -> str:
+def _perguntar(texto: str, padrao: str = "", validar=None) -> str:
+    """Repete a pergunta enquanto validar devolver mensagem de erro."""
     sufixo = f" [{padrao}]" if padrao else ""
-    return input(f"{texto}{sufixo}: ").strip() or padrao
+    while True:
+        resposta = input(f"{texto}{sufixo}: ").strip() or padrao
+        erro = validar(resposta) if validar else None
+        if not erro:
+            return resposta
+        print(f"  {erro}")
+
+
+def _separar_host(texto: str) -> tuple[str, int | None]:
+    """Aceita 'host', 'host:porta', 'usuario@host' e 'sftp://host:porta/pasta'."""
+    valor = re.sub(r"^[a-z][a-z0-9+.-]*://", "", texto.strip(), flags=re.IGNORECASE)
+    valor = valor.split("/", 1)[0].rsplit("@", 1)[-1]
+    host, _, porta = valor.partition(":")
+    return host, int(porta) if porta.isdigit() else None
+
+
+def _erro_porta(texto: str) -> str | None:
+    return None if texto.isdigit() and 0 < int(texto) < 65536 else "Porta deve ser um numero de 1 a 65535."
+
+
+def _erro_repositorio(texto: str) -> str | None:
+    if not texto:
+        return None
+    pasta = Path(texto).expanduser()
+    if not pasta.is_dir():
+        return f"Pasta nao existe: {pasta}. Deixe vazio para vincular depois."
+    if raiz_git(pasta) is None:
+        return f"{pasta} nao e repositorio git. Deixe vazio para vincular depois."
+    return None
 
 
 def _lista(texto: str) -> list[str]:
@@ -71,19 +104,29 @@ def _validar_chave_privada(caminho: str) -> None:
 def adicionar(nome: str) -> int:
     if nome in carregar_perfis():
         raise SystemExit(f"O perfil {nome} ja existe. Edite ~/.sftp-mcp/perfis.toml ou remova antes.")
-    host = _perguntar("Host")
-    porta = int(_perguntar("Porta", "22"))
-    usuario = _perguntar("Usuario")
-    autenticacao = _perguntar("Autenticacao (senha/chave)", "senha")
+    host, porta_no_host = _separar_host(
+        _perguntar("Host (aceita sftp://host:porta)", validar=lambda t: None if _separar_host(t)[0] else "Host vazio.")
+    )
+    porta = int(_perguntar("Porta", str(porta_no_host or 22), _erro_porta))
+    usuario = _perguntar("Usuario", validar=lambda t: None if t else "Usuario vazio.")
+    autenticacao = _perguntar(
+        "Autenticacao (senha/chave)", "senha",
+        lambda t: None if t in AUTENTICACOES else "Responda senha ou chave.",
+    )
     chave_privada = ""
     if autenticacao == "chave":
         chave_privada = str(Path(_perguntar("Caminho da chave privada (formato OpenSSH)")).expanduser())
         _validar_chave_privada(chave_privada)
-    ambiente = _perguntar(f"Ambiente ({'/'.join(AMBIENTES)})", "dev")
+    ambiente = _perguntar(
+        f"Ambiente ({'/'.join(AMBIENTES)})", "dev",
+        lambda t: None if t in AMBIENTES else f"Responda {', '.join(AMBIENTES)}.",
+    )
     tspace_cliente = _perguntar("Codigo do cliente no tspace (opcional)")
     raizes_escrita = _lista(_perguntar("Raizes de escrita, separadas por virgula (vazio = sem escrita)"))
     raizes_leitura = _lista(_perguntar("Raizes de leitura, separadas por virgula (vazio = servidor todo)"))
-    repositorio = _perguntar("Pasta do repositorio do cliente (opcional, da para vincular depois)")
+    repositorio = _perguntar(
+        "Pasta do repositorio do cliente (opcional, da para vincular depois)", validar=_erro_repositorio
+    )
 
     host_key = _confirmar_chave(host, porta)
     perfil = Perfil(

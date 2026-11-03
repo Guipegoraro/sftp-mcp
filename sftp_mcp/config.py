@@ -60,6 +60,10 @@ class Perfil:
             )
         if not self.host or not self.usuario:
             raise ErroConfig(f"Perfil {self.nome}: host e usuario sao obrigatorios.")
+        if re.search(r"[/:@\s]", self.host):
+            raise ErroConfig(
+                f"Perfil {self.nome}: host {self.host!r} deve ser so o nome, sem sftp://, usuario ou porta."
+            )
         if not self.host_key:
             raise ErroConfig(
                 f"Perfil {self.nome}: sem host_key. Cadastre pelo setup para fixar a chave do servidor."

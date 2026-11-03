@@ -100,3 +100,31 @@ async def test_downloads_em_paralelo_nao_colidem(ops, perfil, remoto):
     locais = {r["arquivo_local"] for r in resultados}
     assert len(locais) == 2
     assert all((pasta_local(perfil) / "downloads").exists() for _ in locais)
+
+
+@pytest.mark.parametrize(
+    "digitado, esperado",
+    [
+        ("sftp://blanks.protheus.cloudtotvs.com.br", ("blanks.protheus.cloudtotvs.com.br", None)),
+        ("sftp://blanks.protheus.cloudtotvs.com.br:10501/pasta", ("blanks.protheus.cloudtotvs.com.br", 10501)),
+        ("ftp_user@host.com.br:2222", ("host.com.br", 2222)),
+        ("host.com.br", ("host.com.br", None)),
+    ],
+)
+def test_setup_aceita_host_com_esquema_e_porta(digitado, esperado):
+    from sftp_mcp.setup import _separar_host
+
+    assert _separar_host(digitado) == esperado
+
+
+def test_perfil_recusa_host_com_esquema(perfil):
+    perfil.host = "sftp://host.com.br"
+    with pytest.raises(config.ErroConfig, match="sem sftp://"):
+        perfil.validar()
+
+
+async def test_host_que_nao_resolve_da_mensagem_clara():
+    from sftp_mcp.conexao import ErroConexao, chave_do_servidor
+
+    with pytest.raises(ErroConexao, match="Nao resolveu o host"):
+        await chave_do_servidor("host-que-nao-existe.invalid", 22)

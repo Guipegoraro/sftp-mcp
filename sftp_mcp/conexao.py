@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -32,7 +33,15 @@ def fingerprint(chave_publica: str) -> str:
 
 async def chave_do_servidor(host: str, porta: int, timeout: int = 15) -> str:
     """Le a chave publica que o servidor apresenta, para o usuario conferir no cadastro."""
-    chave = await asyncio.wait_for(asyncssh.get_server_host_key(host, porta, config=None), timeout)
+    try:
+        chave = await asyncio.wait_for(asyncssh.get_server_host_key(host, porta, config=None), timeout)
+    except socket.gaierror as e:
+        raise ErroConexao(f"Nao resolveu o host {host!r}: confira o nome, sem sftp:// nem porta.") from e
+    except (OSError, asyncio.TimeoutError, asyncssh.Error) as e:
+        raise ErroConexao(
+            f"Nao conectou em {host}:{porta}: {e or type(e).__name__}. "
+            "Confira host, porta e, se o cliente exige VPN, se ela esta ativa."
+        ) from e
     if chave is None:
         raise ErroConexao(f"{host}:{porta} nao apresentou chave de host.")
     return chave.export_public_key("openssh").decode("ascii").strip()
