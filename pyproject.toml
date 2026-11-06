@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Guilherme Pegoraro" }]
 keywords = ["mcp", "sftp", "claude"]
 dependencies = [
-    "mcp>=1.27",
+    "mcp>=1.27,<2",
     "asyncssh>=2.24",
     "keyring>=25.0",
     "tomli-w>=1.0",
