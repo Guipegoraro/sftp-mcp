@@ -6,6 +6,7 @@ import time
 import pytest
 
 from sftp_mcp import config
+from sftp_mcp.cadastro import separar_url
 from sftp_mcp.conexao import _opcoes_conexao
 from sftp_mcp.operacoes import ErroOperacao, _decodificar
 
@@ -105,16 +106,14 @@ async def test_downloads_em_paralelo_nao_colidem(ops, perfil, remoto):
 @pytest.mark.parametrize(
     "digitado, esperado",
     [
-        ("sftp://blanks.protheus.cloudtotvs.com.br", ("blanks.protheus.cloudtotvs.com.br", None)),
-        ("sftp://blanks.protheus.cloudtotvs.com.br:10501/pasta", ("blanks.protheus.cloudtotvs.com.br", 10501)),
-        ("ftp_user@host.com.br:2222", ("host.com.br", 2222)),
-        ("host.com.br", ("host.com.br", None)),
+        ("sftp://blanks.protheus.cloudtotvs.com.br", ("blanks.protheus.cloudtotvs.com.br", None, "")),
+        ("sftp://blanks.protheus.cloudtotvs.com.br:10501/a/b/", ("blanks.protheus.cloudtotvs.com.br", 10501, "/a/b")),
+        ("ftp_user@host.com.br:2222", ("host.com.br", 2222, "")),
+        ("host.com.br", ("host.com.br", None, "")),
     ],
 )
 def test_setup_aceita_host_com_esquema_e_porta(digitado, esperado):
-    from sftp_mcp.setup import _separar_host
-
-    assert _separar_host(digitado) == esperado
+    assert separar_url(digitado) == esperado
 
 
 def test_perfil_recusa_host_com_esquema(perfil):

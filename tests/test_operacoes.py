@@ -155,13 +155,13 @@ async def test_enviar_por_link_que_sai_da_raiz(ops, perfil, remoto, tmp_path):
     assert not (remoto / "fora" / "x.txt").exists()
 
 
-async def test_perfil_sem_raiz_de_escrita_nao_escreve(ops, perfil, tmp_path):
+async def test_perfil_sem_raiz_de_escrita_escreve_em_qualquer_pasta(ops, perfil, remoto, tmp_path):
     perfil.raizes_escrita = []
     config.salvar_perfil(perfil)
     local = tmp_path / "x.txt"
     local.write_text("x")
-    with pytest.raises(ErroOperacao, match="escrita desabilitada"):
-        await ops.enviar(perfil.nome, str(local), "/escrita/x.txt")
+    await ops.enviar(perfil.nome, str(local), "/fora/x.txt")
+    assert (remoto / "fora" / "x.txt").exists()
 
 
 async def test_criar_pasta(ops, perfil, remoto):
@@ -243,5 +243,5 @@ async def test_so_as_tools_de_escrita_exigem_aprovacao():
     for nome, ferramenta in ferramentas.items():
         exige = (ferramenta.meta or {}).get("anthropic/requiresUserInteraction") is True
         assert exige == (nome in escrita), nome
-        assert ferramenta.annotations.readOnlyHint == (nome not in escrita), nome
+        assert ferramenta.annotations.readOnlyHint == (nome not in escrita | {"sftp_cadastrar"}), nome
     assert not any("apagar" in n or "delete" in n or "remover" in n for n in ferramentas)

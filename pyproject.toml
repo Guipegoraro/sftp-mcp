@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sftp-mcp"
 version = "0.1.0"
-description = "MCP server de acesso SFTP a servidores de clientes: leitura livre, escrita com aprovacao do usuario"
+description = "MCP server de acesso ao SFTP do TCloud, da TOTVS: leitura livre, escrita com aprovacao do usuario"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

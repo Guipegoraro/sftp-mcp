@@ -47,7 +47,8 @@ async def chave_do_servidor(host: str, porta: int, timeout: int = 15) -> str:
     return chave.export_public_key("openssh").decode("ascii").strip()
 
 
-def _opcoes_conexao(perfil: Perfil) -> asyncssh.SSHClientConnectionOptions:
+def _opcoes_conexao(perfil: Perfil, segredo: str | None = None) -> asyncssh.SSHClientConnectionOptions:
+    """segredo em memoria tem prioridade sobre o keyring: o cadastro testa o login antes de gravar."""
     opcoes = dict(
         username=perfil.usuario,
         # Somente a chave fixada no cadastro e aceita. Lista vazia faria o asyncssh
@@ -62,7 +63,7 @@ def _opcoes_conexao(perfil: Perfil) -> asyncssh.SSHClientConnectionOptions:
         keepalive_interval=60,
     )
     if perfil.autenticacao == "senha":
-        senha = credenciais.obter(perfil.nome, "senha")
+        senha = segredo or credenciais.obter(perfil.nome, "senha")
         if not senha:
             raise ErroConexao(
                 f"Perfil {perfil.nome} sem senha no Credential Manager. "
@@ -72,7 +73,7 @@ def _opcoes_conexao(perfil: Perfil) -> asyncssh.SSHClientConnectionOptions:
     else:
         opcoes.update(
             client_keys=[perfil.chave_privada],
-            passphrase=credenciais.obter(perfil.nome, "passphrase"),
+            passphrase=segredo or credenciais.obter(perfil.nome, "passphrase"),
             password=None,
         )
     resultado = asyncssh.SSHClientConnectionOptions(**opcoes)
@@ -105,7 +106,7 @@ class GerenciadorConexoes:
         self._travas: dict[str, asyncio.Lock] = {}
 
     @asynccontextmanager
-    async def usar(self, perfil: Perfil):
+    async def usar(self, perfil: Perfil, segredo: str | None = None):
         """Entrega o cliente SFTP do perfil. A conexao nao fecha por ociosidade enquanto em uso."""
         self._fechar_ociosas()
         trava = self._travas.setdefault(perfil.nome, asyncio.Lock())
@@ -114,7 +115,7 @@ class GerenciadorConexoes:
             if atual is None or atual.morta():
                 if atual is not None:
                     self._descartar(perfil.nome)
-                atual = await self._conectar(perfil)
+                atual = await self._conectar(perfil, segredo)
                 self._conexoes[perfil.nome] = atual
             atual.em_uso += 1
         try:
@@ -126,9 +127,9 @@ class GerenciadorConexoes:
             atual.em_uso -= 1
             atual.ultimo_uso = time.monotonic()
 
-    async def _conectar(self, perfil: Perfil) -> _Conexao:
+    async def _conectar(self, perfil: Perfil, segredo: str | None) -> _Conexao:
         try:
-            conexao = await asyncssh.connect(perfil.host, perfil.porta, options=_opcoes_conexao(perfil))
+            conexao = await asyncssh.connect(perfil.host, perfil.porta, options=_opcoes_conexao(perfil, segredo))
         except asyncssh.HostKeyNotVerifiable as e:
             raise ErroConexao(
                 f"A chave do servidor {perfil.host}:{perfil.porta} nao confere com a fixada no perfil "
@@ -144,9 +145,15 @@ class GerenciadorConexoes:
             ) from e
         try:
             sftp = await conexao.start_sftp_client()
+            # O chdir do asyncssh so resolve o caminho, nao confere se a pasta existe.
+            if perfil.pasta_inicial and not await sftp.isdir(perfil.pasta_inicial):
+                conexao.close()
+                raise ErroConexao(f"A rota {perfil.pasta_inicial} nao existe ou nao e pasta no servidor.")
+            if perfil.pasta_inicial:
+                await sftp.chdir(perfil.pasta_inicial)
         except asyncssh.Error as e:
             conexao.close()
-            raise ErroConexao(f"O servidor do perfil {perfil.nome} recusou o subsistema SFTP: {e}") from e
+            raise ErroConexao(f"O servidor do perfil {perfil.nome} recusou o acesso SFTP: {e}") from e
         return _Conexao(conexao, sftp, time.monotonic(), perfil.ocioso_max_segundos)
 
     def _descartar(self, nome: str, esperada: _Conexao | None = None) -> None:

@@ -15,12 +15,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
-import re
 import sys
 from pathlib import Path
 
-from . import credenciais
-from .armazenamento import raiz_git
+from . import cadastro, credenciais
 from .config import (
     AMBIENTES, AUTENTICACOES, ErroConfig, Perfil, carregar_perfis, obter_perfil, salvar_perfil, salvar_perfis,
 )
@@ -39,27 +37,8 @@ def _perguntar(texto: str, padrao: str = "", validar=None) -> str:
         print(f"  {erro}")
 
 
-def _separar_host(texto: str) -> tuple[str, int | None]:
-    """Aceita 'host', 'host:porta', 'usuario@host' e 'sftp://host:porta/pasta'."""
-    valor = re.sub(r"^[a-z][a-z0-9+.-]*://", "", texto.strip(), flags=re.IGNORECASE)
-    valor = valor.split("/", 1)[0].rsplit("@", 1)[-1]
-    host, _, porta = valor.partition(":")
-    return host, int(porta) if porta.isdigit() else None
-
-
 def _erro_porta(texto: str) -> str | None:
     return None if texto.isdigit() and 0 < int(texto) < 65536 else "Porta deve ser um numero de 1 a 65535."
-
-
-def _erro_repositorio(texto: str) -> str | None:
-    if not texto:
-        return None
-    pasta = Path(texto).expanduser()
-    if not pasta.is_dir():
-        return f"Pasta nao existe: {pasta}. Deixe vazio para vincular depois."
-    if raiz_git(pasta) is None:
-        return f"{pasta} nao e repositorio git. Deixe vazio para vincular depois."
-    return None
 
 
 def _lista(texto: str) -> list[str]:
@@ -69,6 +48,9 @@ def _lista(texto: str) -> list[str]:
 def _confirmar_chave(host: str, porta: int, atual: str | None = None) -> str:
     chave = asyncio.run(chave_do_servidor(host, porta))
     algoritmo = chave.split()[0]
+    if not atual and cadastro.chave_conhecida(chave):
+        print(f"Chave do servidor ja aceita em outro perfil: {algoritmo} {fingerprint(chave)}")
+        return chave
     if atual:
         print(f"Chave fixada hoje:   {atual.split()[0]} {fingerprint(atual)}")
     print(f"Chave do servidor:   {algoritmo} {fingerprint(chave)}")
@@ -78,16 +60,13 @@ def _confirmar_chave(host: str, porta: int, atual: str | None = None) -> str:
     return chave
 
 
-def _ler_segredo(perfil: Perfil) -> None:
-    if perfil.autenticacao == "senha":
-        segredo = getpass.getpass("Senha: ")
-        if not segredo:
-            raise SystemExit("Senha vazia. Nada foi gravado.")
-        credenciais.gravar(perfil.nome, "senha", segredo)
-    else:
-        segredo = getpass.getpass("Passphrase da chave (vazio se nao tiver): ")
-        if segredo:
-            credenciais.gravar(perfil.nome, "passphrase", segredo)
+def _pedir_segredo(perfil: Perfil) -> str:
+    if perfil.autenticacao == "chave":
+        return getpass.getpass("Passphrase da chave (vazio se nao tiver): ")
+    segredo = getpass.getpass("Senha: ")
+    if not segredo:
+        raise SystemExit("Senha vazia. Nada foi gravado.")
+    return segredo
 
 
 def _validar_chave_privada(caminho: str) -> None:
@@ -104,10 +83,10 @@ def _validar_chave_privada(caminho: str) -> None:
 def adicionar(nome: str) -> int:
     if nome in carregar_perfis():
         raise SystemExit(f"O perfil {nome} ja existe. Edite ~/.sftp-mcp/perfis.toml ou remova antes.")
-    host, porta_no_host = _separar_host(
-        _perguntar("Host (aceita sftp://host:porta)", validar=lambda t: None if _separar_host(t)[0] else "Host vazio.")
+    host, porta_na_url, rota = cadastro.separar_url(
+        _perguntar("URL (sftp://host:porta/rota)", validar=lambda t: None if cadastro.separar_url(t)[0] else "URL vazia.")
     )
-    porta = int(_perguntar("Porta", str(porta_no_host or 22), _erro_porta))
+    porta = int(_perguntar("Porta", str(porta_na_url or 22), _erro_porta))
     usuario = _perguntar("Usuario", validar=lambda t: None if t else "Usuario vazio.")
     autenticacao = _perguntar(
         "Autenticacao (senha/chave)", "senha",
@@ -118,28 +97,27 @@ def adicionar(nome: str) -> int:
         chave_privada = str(Path(_perguntar("Caminho da chave privada (formato OpenSSH)")).expanduser())
         _validar_chave_privada(chave_privada)
     ambiente = _perguntar(
-        f"Ambiente ({'/'.join(AMBIENTES)})", "dev",
+        f"Ambiente ({'/'.join(AMBIENTES)})", cadastro.deduzir_ambiente(usuario),
         lambda t: None if t in AMBIENTES else f"Responda {', '.join(AMBIENTES)}.",
     )
     tspace_cliente = _perguntar("Codigo do cliente no tspace (opcional)")
-    raizes_escrita = _lista(_perguntar("Raizes de escrita, separadas por virgula (vazio = sem escrita)"))
+    raizes_escrita = _lista(_perguntar("Raizes de escrita, separadas por virgula (vazio = qualquer pasta, sempre com aprovacao)"))
     raizes_leitura = _lista(_perguntar("Raizes de leitura, separadas por virgula (vazio = servidor todo)"))
     repositorio = _perguntar(
-        "Pasta do repositorio do cliente (opcional, da para vincular depois)", validar=_erro_repositorio
+        "Pasta do repositorio do cliente (opcional, da para vincular depois)", validar=cadastro.erro_repositorio
     )
 
     host_key = _confirmar_chave(host, porta)
     perfil = Perfil(
-        nome=nome, host=host, porta=porta, usuario=usuario, host_key=host_key,
+        nome=nome, host=host, porta=porta, usuario=usuario, host_key=host_key, pasta_inicial=rota,
         autenticacao=autenticacao, chave_privada=chave_privada, ambiente=ambiente,
         tspace_cliente=tspace_cliente, raizes_leitura=raizes_leitura, raizes_escrita=raizes_escrita,
     )
     perfil.validar()
-    _ler_segredo(perfil)
-    salvar_perfil(perfil)
+    resultado = asyncio.run(cadastro.registrar(perfil, _pedir_segredo(perfil), repositorio))
     print(f"Perfil {nome} gravado.")
-    if repositorio:
-        vincular(nome, repositorio)
+    if resultado["aviso"]:
+        print(f"AVISO: {resultado['aviso']}")
     return testar(nome)
 
 
@@ -190,7 +168,10 @@ def trocar_fingerprint(nome: str) -> int:
 
 
 def definir_senha(nome: str) -> int:
-    _ler_segredo(obter_perfil(nome))
+    perfil = obter_perfil(nome)
+    segredo = _pedir_segredo(perfil)
+    if segredo:
+        credenciais.gravar(nome, "senha" if perfil.autenticacao == "senha" else "passphrase", segredo)
     print("Segredo gravado no Credential Manager.")
     return 0
 
@@ -226,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     try:
         return acoes[args.comando]()
-    except (ErroConfig, ErroConexao, *ERROS_ESPERADOS) as e:
+    except (ErroConfig, ErroConexao, OSError, *ERROS_ESPERADOS) as e:
         print(f"Erro: {e}", file=sys.stderr)
         return 1
 

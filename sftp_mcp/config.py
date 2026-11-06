@@ -17,7 +17,7 @@ import tomli_w
 
 AMBIENTES = ("prod", "hml", "dev")
 AUTENTICACOES = ("senha", "chave")
-_NOME_VALIDO = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+NOME_VALIDO = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 
 class ErroConfig(Exception):
@@ -45,6 +45,7 @@ class Perfil:
     ambiente: str = "dev"
     tspace_cliente: str = ""
     repositorio: str = ""
+    pasta_inicial: str = ""
     raizes_leitura: list[str] = field(default_factory=list)
     raizes_escrita: list[str] = field(default_factory=list)
     timeout_conexao: int = 15
@@ -54,7 +55,7 @@ class Perfil:
     busca_max_resultados: int = 2000
 
     def validar(self) -> None:
-        if not _NOME_VALIDO.match(self.nome):
+        if not NOME_VALIDO.match(self.nome):
             raise ErroConfig(
                 f"Nome de perfil invalido: {self.nome!r}. Use letras minusculas, numeros e hifen."
             )
@@ -74,6 +75,8 @@ class Perfil:
             raise ErroConfig(f"Perfil {self.nome}: autenticacao por chave sem chave_privada.")
         if self.ambiente not in AMBIENTES:
             raise ErroConfig(f"Perfil {self.nome}: ambiente deve ser {', '.join(AMBIENTES)}.")
+        if self.pasta_inicial and not self.pasta_inicial.startswith("/"):
+            raise ErroConfig(f"Perfil {self.nome}: pasta_inicial precisa ser caminho absoluto.")
         for raiz in self.raizes_leitura + self.raizes_escrita:
             if not raiz.startswith("/"):
                 raise ErroConfig(f"Perfil {self.nome}: raiz {raiz!r} precisa ser caminho absoluto.")

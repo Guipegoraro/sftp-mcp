@@ -67,6 +67,16 @@ def ignorado_pelo_git(repositorio: Path, relativo: Path) -> bool:
     return saida.returncode == 0
 
 
+def aviso_git(raiz: Path, perfil: str) -> str | None:
+    relativo = subpasta_relativa(perfil)
+    if ignorado_pelo_git(raiz, relativo):
+        return None
+    return (
+        f"{relativo.as_posix()} NAO esta ignorado pelo git em {raiz}: downloads e backups do "
+        "cliente podem entrar num commit. Avise o usuario."
+    )
+
+
 def _segmento_seguro(segmento: str) -> str:
     seguro = _CARACTERES_INVALIDOS_WINDOWS.sub("_", segmento).rstrip(" .") or "_"
     if seguro.split(".")[0].upper() in _NOMES_RESERVADOS_WINDOWS:

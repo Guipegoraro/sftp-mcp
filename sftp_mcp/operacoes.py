@@ -229,8 +229,9 @@ class Operacoes:
 
     async def _checar_escrita(self, perfil: Perfil, sftp, caminho_real: str, *, estrito: bool = False) -> None:
         """estrito recusa a propria raiz: mover a raiz mexe na pasta mae, fora dela."""
+        # raizes_escrita e restricao opcional: quem autoriza a escrita e o prompt de aprovacao.
         if not perfil.raizes_escrita:
-            raise ErroOperacao(f"O perfil {perfil.nome} nao tem raizes_escrita: escrita desabilitada.")
+            return
         if not _dentro(caminho_real, await self._raizes_reais(sftp, perfil.raizes_escrita), estrito=estrito):
             raise ErroOperacao(
                 f"{caminho_real} esta fora das raizes de escrita do perfil {perfil.nome}: "
@@ -621,14 +622,8 @@ class Operacoes:
         anterior = perfil.repositorio
         perfil.repositorio = str(raiz)
         config.salvar_perfil(perfil)
-        relativo = armazenamento.subpasta_relativa(perfil.nome)
         pasta_local = armazenamento.pasta_perfil(perfil)
-        aviso = None
-        if not armazenamento.ignorado_pelo_git(raiz, relativo):
-            aviso = (
-                f"{relativo.as_posix()} NAO esta ignorado pelo git em {raiz}: downloads e backups do "
-                "cliente podem entrar num commit. Avise o usuario."
-            )
+        aviso = armazenamento.aviso_git(raiz, perfil.nome)
         armazenamento.auditar(
             perfil, "vincular_repositorio", "ok", repositorio=str(raiz), anterior=anterior or None, aviso=aviso
         )
