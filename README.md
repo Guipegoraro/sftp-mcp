@@ -23,7 +23,7 @@ Não existe tool de apagar.
 
 ## Travas
 
-- **Aprovação em toda escrita.** As tools de escrita declaram `_meta["anthropic/requiresUserInteraction"]: true`, e o Claude Code mostra o prompt de permissão em toda chamada, sem "não perguntar de novo", em qualquer modo de permissão. Como segunda camada, cadastre as mesmas tools em `permissions.ask` (veja Instalação).
+- **Aprovação em toda escrita.** As tools de escrita declaram `_meta["anthropic/requiresUserInteraction"]: true`, e o Claude Code mostra o prompt de permissão em toda chamada, sem "não perguntar de novo". Isso vem no código: não precisa configurar nada, e foi testado com `--dangerously-skip-permissions`, sem nenhuma regra no `settings.json`.
 - **Só o Claude Code garante esse prompt.** A marca `requiresUserInteraction` é dele, e o servidor não confere se houve aprovação. Em outro cliente MCP, use `raizes_escrita` e não conte com a confirmação.
 - **Raízes de escrita (opcional).** Por padrão a escrita vale em qualquer pasta que o usuário SFTP alcance, sempre com aprovação. Para limitar, declare `raizes_escrita` no perfil. O caminho é resolvido pelo servidor (`realpath`) antes da checagem, então `..` e symlink não saem da raiz. Escrever sobre um symlink é recusado em qualquer caso.
 - **Host key fixada.** A chave pública do servidor é gravada no cadastro. Chave nova pede a sua confirmação; chave já aceita em outro perfil entra direto, porque vários ambientes do TCloud ficam atrás do mesmo gateway. Se o servidor apresentar outra depois, a conexão é recusada. O `~/.ssh/known_hosts`, o `~/.ssh/config` e o agente SSH não são usados.
@@ -61,20 +61,7 @@ Registre no Claude Code (escopo de usuário):
 claude mcp add -s user sftp -- python -P -m sftp_mcp
 ```
 
-Em `~/.claude/settings.json`, acrescente a segunda camada de aprovação:
-
-```json
-{
-  "permissions": {
-    "ask": [
-      "mcp__sftp__sftp_enviar",
-      "mcp__sftp__sftp_criar_pasta",
-      "mcp__sftp__sftp_renomear",
-      "mcp__sftp__sftp_vincular_repositorio"
-    ]
-  }
-}
-```
+A aprovação de escrita já vem ativa, sem configuração no `settings.json`.
 
 ## Cadastro de perfis
 
