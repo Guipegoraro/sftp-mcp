@@ -48,9 +48,10 @@ def pasta_perfil(perfil: Perfil) -> Path:
 
 def raiz_git(caminho: Path) -> Path | None:
     try:
+        # stdin desligado: herdado, o git prende o canal stdio do MCP e a tool trava.
         saida = subprocess.run(
             ["git", "-C", str(caminho), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -62,7 +63,7 @@ def raiz_git(caminho: Path) -> Path | None:
 def ignorado_pelo_git(repositorio: Path, relativo: Path) -> bool:
     saida = subprocess.run(
         ["git", "-C", str(repositorio), "check-ignore", "-q", relativo.as_posix()],
-        capture_output=True, timeout=15,
+        capture_output=True, timeout=15, stdin=subprocess.DEVNULL,
     )
     return saida.returncode == 0
 
