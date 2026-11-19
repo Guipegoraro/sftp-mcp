@@ -122,5 +122,7 @@ Os testes sobem um servidor SFTP do `asyncssh` no próprio processo e usam um ke
 ## Limites conhecidos
 
 - Só SFTP. FTP e FTPS não são suportados.
+- Nome de arquivo com byte que não é UTF-8 (comum no spool do Protheus) aparece como `\xHH` (`t\xE3\xADtulos.xml`). Repetir o caminho assim chega ao arquivo; outra barra invertida continua recusada.
+- A cifra `chacha20-poly1305` fica fora da proposta do cliente: com ela, o gateway `SSH-2.0-Pandora` do TCloud derruba o login com "Max packet size exceeded". AES-GCM e AES-CTR continuam.
 - Sem jump host. VPN fica por sua conta.
 - Quem roda código como o seu usuário do Windows lê o Credential Manager. Veja [SECURITY.md](SECURITY.md).
