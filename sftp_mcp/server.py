@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import inspect
 from contextlib import asynccontextmanager
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import cadastro
+from . import cadastro, nomes
 from .conexao import GerenciadorConexoes
 from .operacoes import Operacoes
 
@@ -27,6 +30,7 @@ Regras:
 5. sftp_enviar so aceita arquivo local existente. Sobrescrever exige sobrescrever=true; a versao anterior e baixada antes para backups/.
 6. NUNCA peca senha no chat. Para ambiente novo, chame sftp_cadastrar passando o nome do perfil e a pasta do repositorio do cliente, quando souber. Se a senha mudar, peca ao usuario para rodar sftp-mcp-setup definir-senha.
 7. sftp_ler e sftp_ultimas_linhas devolvem no maximo o limite de bytes do perfil (padrao 1 MB). Para arquivo grande use linha_inicial/max_linhas, ou sftp_baixar.
+8. Nome com byte que nao e UTF-8 aparece como \\xHH (ex.: t\\xE3\\xADtulos.xml). Para usar o arquivo, repita o caminho exatamente assim.
 """
 
 _gerenciador = GerenciadorConexoes()
@@ -50,6 +54,35 @@ mcp = FastMCP("sftp", instructions=_INSTRUCOES, lifespan=_ciclo_de_vida)
 _EXIGE_APROVACAO = {"anthropic/requiresUserInteraction": True}
 
 
+def _saneado(funcao):
+    """Resultado e erro com byte cru de nome remoto nao serializam: saem com \\xHH."""
+    def _erro(e: Exception) -> Exception:
+        texto = str(e)
+        return ToolError(nomes.exibir(texto)) if nomes.exibir(texto) != texto else e
+
+    if inspect.iscoroutinefunction(funcao):
+        @functools.wraps(funcao)
+        async def envelope(*args, **kwargs):
+            try:
+                return nomes.sanear(await funcao(*args, **kwargs))
+            except Exception as e:
+                erro = _erro(e)
+                if erro is e:
+                    raise
+                raise erro from e
+    else:
+        @functools.wraps(funcao)
+        def envelope(*args, **kwargs):
+            try:
+                return nomes.sanear(funcao(*args, **kwargs))
+            except Exception as e:
+                erro = _erro(e)
+                if erro is e:
+                    raise
+                raise erro from e
+    return envelope
+
+
 def _leitura(titulo: str) -> ToolAnnotations:
     return ToolAnnotations(title=titulo, readOnlyHint=True, destructiveHint=False, openWorldHint=True)
 
@@ -59,12 +92,14 @@ def _escrita(titulo: str, *, destrutiva: bool) -> ToolAnnotations:
 
 
 @mcp.tool(annotations=_leitura("Perfis SFTP cadastrados"))
+@_saneado
 def sftp_perfis() -> list[dict]:
     """Lista os perfis cadastrados (sem segredo): host, ambiente, repositorio vinculado e raizes."""
     return _operacoes.perfis()
 
 
 @mcp.tool(annotations=_leitura("Listar pasta remota"))
+@_saneado
 async def sftp_listar(perfil: str, caminho: str = ".", padrao: str | None = None) -> dict:
     """Lista uma pasta do servidor. caminho relativo parte da pasta inicial do usuario SFTP.
     padrao filtra por nome no estilo glob (ex.: "*.log"), sem diferenciar maiusculas."""
@@ -72,12 +107,14 @@ async def sftp_listar(perfil: str, caminho: str = ".", padrao: str | None = None
 
 
 @mcp.tool(annotations=_leitura("Detalhes de arquivo remoto"))
+@_saneado
 async def sftp_info(perfil: str, caminho: str) -> dict:
     """Tipo, tamanho, datas e permissoes de um arquivo ou pasta do servidor."""
     return await _operacoes.info(perfil, caminho)
 
 
 @mcp.tool(annotations=_leitura("Ler arquivo de texto remoto"))
+@_saneado
 async def sftp_ler(
     perfil: str,
     caminho: str,
@@ -92,12 +129,14 @@ async def sftp_ler(
 
 
 @mcp.tool(annotations=_leitura("Ultimas linhas de arquivo remoto"))
+@_saneado
 async def sftp_ultimas_linhas(perfil: str, caminho: str, linhas: int = 100, encoding: str | None = None) -> dict:
     """Ultimas linhas de um arquivo de texto (console.log, error.log), sem ler o arquivo inteiro."""
     return await _operacoes.ultimas_linhas(perfil, caminho, linhas, encoding)
 
 
 @mcp.tool(annotations=_leitura("Buscar arquivos remotos"))
+@_saneado
 async def sftp_buscar(
     perfil: str,
     caminho: str,
@@ -111,6 +150,7 @@ async def sftp_buscar(
 
 
 @mcp.tool(annotations=_leitura("Baixar arquivo remoto"))
+@_saneado
 async def sftp_baixar(perfil: str, caminho: str) -> dict:
     """Baixa um arquivo para <repositorio>/.claude/sftp/<perfil>/downloads/, espelhando o caminho remoto.
     Nunca sobrescreve: arquivo repetido ganha sufixo (1), (2)..."""
@@ -118,6 +158,7 @@ async def sftp_baixar(perfil: str, caminho: str) -> dict:
 
 
 @mcp.tool(annotations=_escrita("Enviar arquivo ao servidor", destrutiva=True), meta=_EXIGE_APROVACAO)
+@_saneado
 async def sftp_enviar(perfil: str, arquivo_local: str, caminho_remoto: str, sobrescrever: bool = False) -> dict:
     """Envia um arquivo local ao servidor. caminho_remoto terminado em "/" ou que seja pasta recebe o nome do
     arquivo local. Respeita raizes_escrita, se o perfil tiver. Se o destino existe, exige sobrescrever=true e
@@ -126,6 +167,7 @@ async def sftp_enviar(perfil: str, arquivo_local: str, caminho_remoto: str, sobr
 
 
 @mcp.tool(annotations=_escrita("Criar pasta no servidor", destrutiva=False), meta=_EXIGE_APROVACAO)
+@_saneado
 async def sftp_criar_pasta(perfil: str, caminho: str, criar_pais: bool = False) -> dict:
     """Cria uma pasta no servidor. Respeita raizes_escrita, se o perfil tiver. criar_pais cria as
     pastas intermediarias que faltarem."""
@@ -133,6 +175,7 @@ async def sftp_criar_pasta(perfil: str, caminho: str, criar_pais: bool = False) 
 
 
 @mcp.tool(annotations=_escrita("Renomear no servidor", destrutiva=True), meta=_EXIGE_APROVACAO)
+@_saneado
 async def sftp_renomear(perfil: str, origem: str, destino: str) -> dict:
     """Renomeia ou move um arquivo ou pasta. Respeita raizes_escrita, se o perfil tiver.
     Nunca sobrescreve: falha se o destino existir."""
@@ -140,6 +183,7 @@ async def sftp_renomear(perfil: str, origem: str, destino: str) -> dict:
 
 
 @mcp.tool(annotations=_escrita("Vincular repositorio do cliente", destrutiva=False), meta=_EXIGE_APROVACAO)
+@_saneado
 def sftp_vincular_repositorio(perfil: str, caminho_repositorio: str) -> dict:
     """Define o repositorio git local do cliente, onde ficam downloads, backups e auditoria do perfil
     (<repositorio>/.claude/sftp/<perfil>/). Use o caminho que o usuario informou."""
@@ -147,6 +191,7 @@ def sftp_vincular_repositorio(perfil: str, caminho_repositorio: str) -> dict:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Cadastrar SFTP", readOnlyHint=False, destructiveHint=False))
+@_saneado
 async def sftp_cadastrar(perfil: str = "", repositorio: str = "") -> dict:
     """Abre uma janela na tela do usuario para cadastrar um ambiente: URL, usuario, senha e ambiente.
     perfil e repositorio chegam preenchidos para conferencia (ex.: "cbm-dev" e a pasta do repositorio

@@ -23,6 +23,13 @@ _ERROS_DE_CONEXAO = (
 )
 
 
+# Com chacha20 na proposta, o gateway SSH-2.0-Pandora do TCloud derruba o login com
+# "Max packet size exceeded", mesmo negociando AES-GCM.
+_CIFRAS = [
+    a.decode("ascii") for a in asyncssh.encryption.get_default_encryption_algs() if not a.startswith(b"chacha20")
+]
+
+
 class ErroConexao(Exception):
     pass
 
@@ -59,6 +66,7 @@ def _opcoes_conexao(perfil: Perfil, segredo: str | None = None) -> asyncssh.SSHC
         config=None,
         gss_auth=False,
         gss_kex=False,
+        encryption_algs=_CIFRAS,
         connect_timeout=perfil.timeout_conexao,
         keepalive_interval=60,
     )
@@ -144,7 +152,8 @@ class GerenciadorConexoes:
                 "Se o cliente exige VPN, confira se ela esta ativa."
             ) from e
         try:
-            sftp = await conexao.start_sftp_client()
+            # Nome que nao e UTF-8 no servidor nao derruba a listagem e volta igual (ver nomes.py).
+            sftp = await conexao.start_sftp_client(path_errors="surrogateescape")
             # O chdir do asyncssh so resolve o caminho, nao confere se a pasta existe.
             if perfil.pasta_inicial and not await sftp.isdir(perfil.pasta_inicial):
                 conexao.close()
