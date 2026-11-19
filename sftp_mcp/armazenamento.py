@@ -11,6 +11,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import nomes
 from .config import Perfil
 
 _CARACTERES_INVALIDOS_WINDOWS = re.compile(r'[<>:"|?*\\\x00-\x1f]')
@@ -79,7 +80,7 @@ def aviso_git(raiz: Path, perfil: str) -> str | None:
 
 
 def _segmento_seguro(segmento: str) -> str:
-    seguro = _CARACTERES_INVALIDOS_WINDOWS.sub("_", segmento).rstrip(" .") or "_"
+    seguro = _CARACTERES_INVALIDOS_WINDOWS.sub("_", nomes.exibir(segmento)).rstrip(" .") or "_"
     if seguro.split(".")[0].upper() in _NOMES_RESERVADOS_WINDOWS:
         seguro = "_" + seguro
     return seguro
@@ -119,13 +120,13 @@ def destino_backup(perfil: Perfil, caminho_remoto: str) -> Path:
 
 def auditar(perfil: Perfil, operacao: str, resultado: str, **dados) -> None:
     """Uma linha JSON por operacao. Nunca recebe conteudo de arquivo nem segredo."""
-    registro = {
+    registro = nomes.sanear({
         "quando": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "perfil": perfil.nome,
         "ambiente": perfil.ambiente,
         "operacao": operacao,
         "resultado": resultado,
         **dados,
-    }
+    })
     with (pasta_perfil(perfil) / "audit.log").open("a", encoding="utf-8") as f:
         f.write(json.dumps(registro, ensure_ascii=False) + "\n")

@@ -152,7 +152,8 @@ class GerenciadorConexoes:
                 "Se o cliente exige VPN, confira se ela esta ativa."
             ) from e
         try:
-            sftp = await conexao.start_sftp_client()
+            # Nome que nao e UTF-8 no servidor nao derruba a listagem e volta igual (ver nomes.py).
+            sftp = await conexao.start_sftp_client(path_errors="surrogateescape")
             # O chdir do asyncssh so resolve o caminho, nao confere se a pasta existe.
             if perfil.pasta_inicial and not await sftp.isdir(perfil.pasta_inicial):
                 conexao.close()

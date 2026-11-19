@@ -18,7 +18,7 @@ from pathlib import Path
 
 import asyncssh
 
-from . import armazenamento, config, credenciais
+from . import armazenamento, config, credenciais, nomes
 from .armazenamento import ErroRepositorio
 from .conexao import ErroConexao, GerenciadorConexoes
 from .config import ErroConfig, Perfil
@@ -40,12 +40,12 @@ ERROS_ESPERADOS = (ErroOperacao, ErroConfig, ErroConexao, ErroRepositorio)
 def _validar_caminho(caminho: str) -> str:
     if not caminho:
         raise ErroOperacao("Caminho remoto vazio.")
-    if _PROIBIDOS.search(caminho):
+    if _PROIBIDOS.search(nomes.sem_escapes(caminho)):
         raise ErroOperacao(
             "Caminho remoto com barra invertida ou caractere de controle/invisivel. "
-            "Use '/' como separador, inclusive em servidor Windows."
+            "Use '/' como separador, inclusive em servidor Windows. Byte que nao e UTF-8 vai como \\xHH."
         )
-    return posixpath.normpath(caminho)
+    return posixpath.normpath(nomes.ler(caminho))
 
 
 def _dentro(caminho: str, raizes: list[str], *, estrito: bool = False) -> bool:
