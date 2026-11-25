@@ -25,6 +25,7 @@ from .config import ErroConfig, Perfil
 
 _BLOCO = 65_536
 _AMOSTRA_BINARIO = 8_192
+_MAX_LINKS = 10
 # Barra invertida e separador para servidor SFTP sobre Windows: "a\..\..\x" escaparia
 # da raiz sem passar pelo realpath. Caractere invisivel mascararia o destino no prompt.
 _PROIBIDOS = re.compile("[\\\\\x00-\x1f\x7f​-‏‪-‮⁠-⁤⁦-⁩﻿]")
@@ -181,7 +182,38 @@ class Operacoes:
             raise ErroOperacao(_mensagem_sftp(e, caminho)) from None
 
     async def _resolver_existente(self, sftp, caminho: str) -> str:
-        return await self._realpath(sftp, _validar_caminho(caminho))
+        return await self._resolver(sftp, _validar_caminho(caminho))
+
+    async def _resolver(self, sftp, caminho: str, links: int = 0) -> str:
+        try:
+            return await sftp.realpath(caminho)
+        except asyncssh.SFTPNoSuchFile:
+            return await self._resolver_pela_mae(sftp, caminho, links)
+        except asyncssh.SFTPError as e:
+            raise ErroOperacao(_mensagem_sftp(e, caminho)) from None
+
+    async def _resolver_pela_mae(self, sftp, caminho: str, links: int) -> str:
+        """Ha servidor que so resolve realpath de pasta: resolve a pasta mae e confere o arquivo."""
+        nome = posixpath.basename(caminho)
+        try:
+            if nome in ("", ".", ".."):
+                raise asyncssh.SFTPNoSuchFile("")
+            real = posixpath.join(await sftp.realpath(posixpath.dirname(caminho) or "."), nome)
+            attrs = await sftp.lstat(real)
+        except asyncssh.SFTPError as e:
+            raise ErroOperacao(_mensagem_sftp(e, caminho)) from None
+        try:
+            # Nao depende do lstat: ha servidor em que ele segue o link como o stat.
+            alvo = await sftp.readlink(real)
+        except asyncssh.SFTPError:
+            if _tipo(attrs) in ("arquivo", "pasta"):
+                return real
+            raise ErroOperacao(f"Nao foi possivel resolver no servidor: {caminho}") from None
+        if links >= _MAX_LINKS or _PROIBIDOS.search(alvo):
+            raise ErroOperacao(f"Nao foi possivel resolver no servidor: {caminho}")
+        # O link e seguido aqui, e nao pelo servidor, para a checagem de raiz valer para o destino.
+        # Sem normpath: com pasta em link, o ".." do alvo so o servidor sabe resolver.
+        return await self._resolver(sftp, posixpath.join(posixpath.dirname(real), alvo), links + 1)
 
     async def _resolver_novo(self, sftp, caminho: str) -> str:
         """Caminho de algo que pode nao existir: resolve a pasta mae e anexa o nome."""
@@ -215,8 +247,8 @@ class Operacoes:
         reais = []
         for raiz in raizes:
             try:
-                reais.append(await sftp.realpath(raiz))
-            except asyncssh.SFTPError:
+                reais.append(await self._resolver_existente(sftp, raiz))
+            except ErroOperacao:
                 raise ErroOperacao(f"A raiz {raiz} do perfil nao existe no servidor.") from None
         return reais
 
