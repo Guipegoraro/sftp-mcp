@@ -11,6 +11,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import nomes
 from .config import Perfil
 
 _CARACTERES_INVALIDOS_WINDOWS = re.compile(r'[<>:"|?*\\\x00-\x1f]')
@@ -48,9 +49,10 @@ def pasta_perfil(perfil: Perfil) -> Path:
 
 def raiz_git(caminho: Path) -> Path | None:
     try:
+        # stdin desligado: herdado, o git prende o canal stdio do MCP e a tool trava.
         saida = subprocess.run(
             ["git", "-C", str(caminho), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -62,7 +64,7 @@ def raiz_git(caminho: Path) -> Path | None:
 def ignorado_pelo_git(repositorio: Path, relativo: Path) -> bool:
     saida = subprocess.run(
         ["git", "-C", str(repositorio), "check-ignore", "-q", relativo.as_posix()],
-        capture_output=True, timeout=15,
+        capture_output=True, timeout=15, stdin=subprocess.DEVNULL,
     )
     return saida.returncode == 0
 
@@ -78,7 +80,7 @@ def aviso_git(raiz: Path, perfil: str) -> str | None:
 
 
 def _segmento_seguro(segmento: str) -> str:
-    seguro = _CARACTERES_INVALIDOS_WINDOWS.sub("_", segmento).rstrip(" .") or "_"
+    seguro = _CARACTERES_INVALIDOS_WINDOWS.sub("_", nomes.exibir(segmento)).rstrip(" .") or "_"
     if seguro.split(".")[0].upper() in _NOMES_RESERVADOS_WINDOWS:
         seguro = "_" + seguro
     return seguro
@@ -118,13 +120,13 @@ def destino_backup(perfil: Perfil, caminho_remoto: str) -> Path:
 
 def auditar(perfil: Perfil, operacao: str, resultado: str, **dados) -> None:
     """Uma linha JSON por operacao. Nunca recebe conteudo de arquivo nem segredo."""
-    registro = {
+    registro = nomes.sanear({
         "quando": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "perfil": perfil.nome,
         "ambiente": perfil.ambiente,
         "operacao": operacao,
         "resultado": resultado,
         **dados,
-    }
+    })
     with (pasta_perfil(perfil) / "audit.log").open("a", encoding="utf-8") as f:
         f.write(json.dumps(registro, ensure_ascii=False) + "\n")

@@ -127,3 +127,8 @@ async def test_host_que_nao_resolve_da_mensagem_clara():
 
     with pytest.raises(ErroConexao, match="Nao resolveu o host"):
         await chave_do_servidor("host-que-nao-existe.invalid", 22)
+
+
+def test_proposta_sem_chacha20_para_o_gateway_pandora(perfil):
+    cifras = _opcoes_conexao(perfil).encryption_algs
+    assert cifras and not any(c.startswith(b"chacha20") for c in cifras)
